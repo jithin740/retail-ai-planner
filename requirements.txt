@@ -1,0 +1,10 @@
+streamlit
+osmnx
+geopandas
+shapely
+folium
+streamlit-folium
+langchain-core
+langchain-groq
+networkx
+pandas
