@@ -4,6 +4,7 @@ geopandas
 shapely
 folium
 streamlit-folium
+langchain
 langchain-core
 langchain-groq
 networkx
