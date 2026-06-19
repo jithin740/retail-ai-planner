@@ -21,8 +21,8 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     graph = ox.routing.add_edge_speeds(graph)
     graph = ox.routing.add_edge_travel_times(graph)
     
-    # 2. Find the closest road intersection to where you clicked on the map
-    center_node = ox.nearest_nodes(graph, lon, lat)
+    # 2. Find the closest road intersection (updated safe method for newer osmnx)
+    center_node = ox.nearest_nodes(graph, X=lon, Y=lat)
     
     # 3. Find all street points reachable within 2 minutes of driving
     subgraph = ox.ego_graph(graph, center_node, radius=time_limit_seconds, distance='travel_time')
