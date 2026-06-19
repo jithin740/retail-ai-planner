@@ -6,6 +6,7 @@ folium
 streamlit-folium
 langchain
 langchain-core
+langchain-community
 langchain-groq
 networkx
 pandas
