@@ -1,11 +1,12 @@
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 
-def generate_spatial_report(target_brand, total_comp, top_10_brands, suitability, cannibalization):
+def generate_spatial_report(target_brand, total_comp, top_10_brands, suitability, cannibalization, api_key):
     """
-    Passes our spatial calculations to an LLM to generate a professional C-suite report.
+    Passes our spatial calculations along with the API key to generate a professional C-suite report.
     """
-    llm = ChatGroq(model="llama3-8b-8b", temperature=0.2)
+    # Pass the key explicitly into the model initialization
+    llm = ChatGroq(model="llama3-8b-8b", temperature=0.2, groq_api_key=api_key)
     
     template = """
     You are an expert AI Market Planning Director specializing in retail site selection and GIS spatial intelligence.
