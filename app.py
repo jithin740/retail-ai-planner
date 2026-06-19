@@ -60,7 +60,11 @@ if map_data and map_data.get("last_clicked"):
         st.header("2. Real-Time Generative Site Report")
         with st.spinner("AI Agent synthesizing GIS datasets..."):
             try:
-                ai_report = generate_spatial_report(target_brand, total_comp, top_10, suitability, cannibalization)
+                # Read the key securely from Streamlit Cloud Secrets
+                api_key = st.secrets["GROQ_API_KEY"]
+                
+                # Pass the key directly into your report generator function
+                ai_report = generate_spatial_report(target_brand, total_comp, top_10, suitability, cannibalization, api_key)
                 st.markdown("---")
                 st.markdown(ai_report)
             except Exception as e:
