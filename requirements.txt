@@ -10,3 +10,4 @@ langchain-community
 langchain-groq
 networkx
 pandas
+scikit-learn
