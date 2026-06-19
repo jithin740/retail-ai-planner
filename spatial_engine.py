@@ -1,4 +1,5 @@
 import osmnx as ox
+import networkx as nx
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point, Polygon
@@ -21,11 +22,11 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     graph = ox.routing.add_edge_speeds(graph)
     graph = ox.routing.add_edge_travel_times(graph)
     
-    # 2. Find the closest road intersection (updated safe method for newer osmnx)
+    # 2. Find the closest road intersection
     center_node = ox.nearest_nodes(graph, X=lon, Y=lat)
     
-    # 3. Find all street points reachable within 2 minutes of driving
-    subgraph = ox.ego_graph(graph, center_node, radius=time_limit_seconds, distance='travel_time')
+    # 3. Find all street points reachable within 2 minutes using NetworkX directly
+    subgraph = nx.ego_graph(graph, center_node, radius=time_limit_seconds, distance='travel_time')
     
     # 4. Connect those points together to form a boundary area (polygon)
     node_points = [Point(data['x'], data['y']) for node, data in subgraph.nodes(data=True)]
