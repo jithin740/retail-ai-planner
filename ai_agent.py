@@ -1,15 +1,12 @@
 from langchain_groq import ChatGroq
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 def generate_spatial_report(target_brand, total_comp, top_10_brands, suitability, cannibalization):
     """
     Passes our spatial calculations to an LLM to generate a professional C-suite report.
     """
-    # We are using Groq's blazing fast free tier (Llama 3). 
-    # You will supply your free API key when running the application.
     llm = ChatGroq(model="llama3-8b-8b", temperature=0.2)
     
-    # This template forces the AI to behave like a corporate expansion expert
     template = """
     You are an expert AI Market Planning Director specializing in retail site selection and GIS spatial intelligence.
     Provide a comprehensive, professional Site Suitability Executive Summary based on the following real-time spatial metrics:
@@ -34,10 +31,8 @@ def generate_spatial_report(target_brand, total_comp, top_10_brands, suitability
         template=template
     )
     
-    # Connect the prompt configuration to the LLM model
     chain = prompt | llm
     
-    # Run the AI to get our report
     response = chain.invoke({
         "target_brand": target_brand,
         "total_comp": total_comp,
