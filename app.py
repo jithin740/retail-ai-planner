@@ -3,7 +3,10 @@ import folium
 from streamlit_folium import st_folium
 import pandas as pd
 from spatial_engine import get_drive_time_buffer, fetch_competitors, calculate_market_scores
-from ai_agent import generate_spatial_report
+
+# MODULAR ADDITIONS: Import our new dedicated functional features
+from geocoder_engine import geocode_location
+from report_engine import generate_ai_report_direct
 
 st.set_page_config(layout="wide", page_title="AI Market Planner Agent")
 
@@ -22,6 +25,16 @@ if "spatial_results" not in st.session_state:
 with col1:
     st.header("1. Input Parameters")
     target_brand = st.text_input("Enter Your Expansion Brand Name:", value="KFC")
+    
+    # 1. NEW COMPONENT: Text Address Search Input Field
+    search_query = st.text_input("🔍 Search Location / City (e.g., 'Indiranagar, Bangalore'):")
+    if search_query:
+        with st.spinner("Geocoding target coordinates..."):
+            found_coords = geocode_location(search_query)
+            if found_coords and found_coords != st.session_state.map_center:
+                st.session_state.map_center = found_coords
+                st.session_state.analysis_done = False  # Ready to run at the new location
+                st.rerun()
 
 def get_category_color(category_str):
     cat = category_str.lower()
@@ -124,11 +137,20 @@ if st.session_state.analysis_done:
         st.header("2. Real-Time Generative Site Report")
         try:
             api_key = st.secrets["GROQ_API_KEY"]
-            ai_report = generate_spatial_report(target_brand, res["total_comp"], res["top_10"], res["suitability"], res["cannibalization"], api_key)
+            
+            # 2. UPDATED COMPONENT: Swap to the bulletproof direct REST report execution engine
+            ai_report = generate_ai_report_direct(
+                target_brand, 
+                res["total_comp"], 
+                res["top_10"], 
+                res["suitability"], 
+                res["cannibalization"], 
+                api_key
+            )
             st.markdown("---")
             st.markdown(ai_report)
-        except Exception:
-            st.info("📊 Spatial infrastructure layer compiled successfully. Insert an active API key to unlock the text report summarizer module.")
+        except Exception as e:
+            st.info(f"📊 Spatial infrastructure layer compiled successfully. API Status: {str(e)}")
 else:
     with col2:
         st.info("👈 Click anywhere on the map grid to display the true drive-time network boundary polygon and overlay local commercial storefront nodes.")
