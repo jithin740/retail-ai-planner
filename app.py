@@ -46,10 +46,18 @@ if not st.session_state.analysis_done:
         st.session_state.map_center = [lat, lon]
         
         with st.spinner("Analyzing spatial patterns and transit infrastructure..."):
-            df_clean, top_10, total_comp, poi_list = fetch_competitors(get_drive_time_buffer(lat, lon)[0])
-            poly, boundary_coords = get_drive_time_buffer(lat, lon)
+            # 1. Compute the drive-time network elements cleanly
+            buffer_data = get_drive_time_buffer(lat, lon)
+            poly = buffer_data[0]             # The Polygon geometry
+            boundary_coords = buffer_data[1]  # The ordered outer outline list
+            
+            # 2. Extract asset features using the distinct polygon
+            df_clean, top_10, total_comp, poi_list = fetch_competitors(poly)
+            
+            # 3. Calculate metrics based on clean variables
             suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
             
+            # 4. Save everything together to session state
             st.session_state.spatial_results = {
                 "lat": lat,
                 "lon": lon,
