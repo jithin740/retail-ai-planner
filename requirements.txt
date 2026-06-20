@@ -11,3 +11,4 @@ langchain-groq
 networkx
 pandas
 scikit-learn
+requests
