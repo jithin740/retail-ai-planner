@@ -7,28 +7,23 @@ def generate_h3_grid(aoi_polygon, h3_resolution):
     Polyfills the 1 km drive-time catchment network polygon using 
     standardized Uber H3 hex spatial cells at the specified resolution.
     """
-    # Format the shapely geometry interface explicitly for Uber H3 polyfill ingestion
-    geo_json_poly = aoi_polygon.__geo_interface__
-    
     try:
-        # Support both H3 v3 (polyfill) and H3 v4 (polygon_to_cells) syntax structures smoothly
-        if hasattr(h3, 'polygon_to_cells'):
-            h3_hexes = h3.polygon_to_cells(geo_json_poly, h3_resolution)
-        else:
-            h3_hexes = h3.polyfill(geo_json_poly, h3_resolution, geo_json=True)
-    except Exception:
-        # Fallback handling for specific geo-interface coordinate orderings
+        # Shapely coordinates are ordered as (lon, lat) -> convert to (lat, lon) for H3 v4
         exterior_coords = list(aoi_polygon.exterior.coords)
-        # H3 expects standard [[lat, lon], ...] sequences for loops
-        formatted_coords = [[lat, lon] for lon, lat in exterior_coords]
+        lat_lng_coords = [(lat, lon) for lon, lat in exterior_coords]
         
-        if hasattr(h3, 'polygon_to_cells'):
-            h3_hexes = h3.polygon_to_cells(formatted_coords, h3_resolution)
+        # Instantiate the explicit H3 v4 LatLngPoly object expected by the engine
+        h3_shape = h3.LatLngPoly(lat_lng_coords)
+        h3_hexes = h3.polygon_to_cells(h3_shape, h3_resolution)
+    except Exception:
+        # High-res structural version fallback layers
+        if hasattr(h3, 'geo_to_cells'):
+            h3_hexes = h3.geo_to_cells(aoi_polygon, h3_resolution)
         else:
-            h3_hexes = h3.polyfill({"type": "Polygon", "coordinates": [exterior_coords]}, h3_resolution, geo_json=True)
+            geo_json_poly = aoi_polygon.__geo_interface__
+            h3_hexes = h3.polyfill(geo_json_poly, h3_resolution, geo_json=True)
 
-    hex_cells = list(h3_hexes)
-    return hex_cells
+    return list(h3_hexes)
 
 def rank_h3_grids(h3_hexes, poi_list, category_weights):
     """
@@ -42,12 +37,20 @@ def rank_h3_grids(h3_hexes, poi_list, category_weights):
         poi_counts_by_cat = {}
         total_pois_in_cell = 0
         
-        # Get outer ring vertex boundary tracks formatted for Folium [[lat, lon], ...]
-        vertices = h3.h3_to_geo_boundary(hex_id)
+        # Graceful cross-version mapping for boundary coordinate extractions
+        if hasattr(h3, 'cell_to_boundary'):
+            vertices = h3.cell_to_boundary(hex_id)
+        else:
+            vertices = h3.h3_to_geo_boundary(hex_id)
+            
         boundary_locations = [[lat, lon] for lat, lon in vertices]
         
-        # Extract cell center point coordinate locations
-        centroid_lat, centroid_lon = h3.h3_to_geo(hex_id)
+        # Extract cell center point coordinate locations safely
+        if hasattr(h3, 'cell_to_latlng'):
+            centroid_lat, centroid_lon = h3.cell_to_latlng(hex_id)
+        else:
+            centroid_lat, centroid_lon = h3.h3_to_geo(hex_id)
+            
         hex_cell_shape = Polygon([[lon, lat] for lat, lon in boundary_locations])
         
         for poi in poi_list:
