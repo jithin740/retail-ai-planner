@@ -35,7 +35,7 @@ def generate_ai_report_direct(target_brand, total_comp, top_10_brands, suitabili
     """
     
     request_body = {
-        "model": "llama3-8b-8192",  # Correct standard Groq deployment ID
+        "model": "llama-3.1-8b-instant",  # Correct standard Groq deployment ID
         "messages": [
             {"role": "system", "content": "You are an elite corporate retail GIS expansion director."},
             {"role": "user", "content": prompt_payload}
