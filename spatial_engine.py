@@ -4,8 +4,10 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point, Polygon
 
+# Tell the system to cache maps and set a standard user agent header to unblock requests
 ox.settings.use_cache = True
 ox.settings.log_console = False
+ox.settings.user_agent = "RetailAIPlannerAgent/1.0 (contact: marketplanning@domain.com)"
 
 def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     """
