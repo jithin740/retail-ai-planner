@@ -12,7 +12,6 @@ st.caption("Live Isochrone Network Mapping & Competitor POI Visualization Engine
 
 col1, col2 = st.columns([1, 1])
 
-# Verify state variables exist
 if "map_center" not in st.session_state:
     st.session_state.map_center = [12.9716, 77.5946] # Bangalore Default
 if "analysis_done" not in st.session_state:
@@ -34,7 +33,6 @@ def get_category_color(category_str):
         return '#2ECC71'  # Green
     return '#9B59B6'      # Purple for general retail
 
-# Phase A: User needs to pick a coordinates spot
 if not st.session_state.analysis_done:
     with col1:
         st.info("💡 Click anywhere on the map grid below to analyze the true 1 km drive-time network.")
@@ -48,12 +46,14 @@ if not st.session_state.analysis_done:
         st.session_state.map_center = [lat, lon]
         
         with st.spinner("Processing network elements..."):
-            # Compute spatial data step-by-step
+            # Compute spatial data components sequentially
             poly, boundary_coords = get_drive_time_buffer(lat, lon)
-            df_clean, top_10, total_comp, poi_list = fetch_competitors(poly)
+            
+            # Pass point parameters along with geometry to bypass Overpass polygon timeouts
+            df_clean, top_10, total_comp, poi_list = fetch_competitors(lat, lon, poly)
+            
             suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
             
-            # Lock objects to session memory
             st.session_state.spatial_results = {
                 "lat": lat,
                 "lon": lon,
@@ -68,15 +68,12 @@ if not st.session_state.analysis_done:
             st.session_state.analysis_done = True
             st.rerun()
 
-# Phase B: Display results safely
 if st.session_state.analysis_done:
     res = st.session_state.spatial_results
-    
-    # Establish persistent map
     m_fixed = folium.Map(location=[res["lat"], res["lon"]], zoom_start=15)
+    
     folium.Marker([res["lat"], res["lon"]], tooltip="Target Store Site", icon=folium.Icon(color="black", icon="star")).add_to(m_fixed)
     
-    # Trace the network polygon line
     if res["boundary_coords"]:
         folium.Polygon(
             locations=res["boundary_coords"],
@@ -88,15 +85,22 @@ if st.session_state.analysis_done:
             tooltip="1 km Drive Buffer Boundaries"
         ).add_to(m_fixed)
         
-    # Drop color-coded scaling circular POI elements
     for poi in res["poi_list"]:
         color = get_category_color(poi["category"])
-        tooltip_html = f"<b>Store Name:</b> {poi['name']}<br><b>Category:</b> {poi['category']}"
+        
+        # Enhanced interactive HTML hover data tooltip
+        tooltip_html = f"""
+        <div style="font-family: Arial, sans-serif; font-size: 12px; padding: 4px; line-height:1.4;">
+            <strong>Asset:</strong> {poi['name']}<br>
+            <strong>Category:</strong> {poi['category']}<br>
+            <strong>Position:</strong> {round(poi['lat'],4)}, {round(poi['lon'],4)}
+        </div>
+        """
         
         folium.Circle(
             location=[poi["lat"], poi["lon"]],
-            radius=15, # Physical footprint meters scale
-            tooltip=tooltip_html,
+            radius=16, # Physical footprint meters zoom-responsive scale
+            tooltip=folium.Tooltip(tooltip_html),
             color=color,
             fill=True,
             fill_color=color,
