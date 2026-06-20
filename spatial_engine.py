@@ -2,9 +2,10 @@ import osmnx as ox
 import networkx as nx
 import geopandas as gpd
 import pandas as pd
+import requests
 from shapely.geometry import Point, Polygon
 
-# Global engine settings
+# Global engine configurations
 ox.settings.use_cache = True
 ox.settings.log_console = False
 ox.settings.user_agent = "RetailAIPlannerAgent/1.0 (contact: marketplanning@domain.com)"
@@ -12,12 +13,10 @@ ox.settings.user_agent = "RetailAIPlannerAgent/1.0 (contact: marketplanning@doma
 def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     """
     Calculates a real 1 km drive-time zone and returns both the Polygon 
-    and a clean outer boundary coordinate array for plotting.
+    and a perfectly ordered exterior ring for a clean map outline.
     """
     try:
         time_limit_seconds = (distance_km / speed_kmh) * 3600
-        
-        # Download local street grid
         graph = ox.graph_from_point((lat, lon), dist=distance_km * 1200, network_type='drive')
         graph = ox.routing.add_edge_speeds(graph)
         graph = ox.routing.add_edge_travel_times(graph)
@@ -36,7 +35,6 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
             
         return isochrone_poly, boundary_coords
     except Exception:
-        # Secure fallback polygon if the street graph calculation encounters an error
         fallback_poly = Point(lon, lat).buffer(0.009)
         x, y = fallback_poly.exterior.coords.xy
         boundary_coords = [[lat_val, lon_val] for lon_val, lat_val in zip(x, y)]
@@ -44,59 +42,92 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
 
 def fetch_competitors(lat, lon, isochrone_polygon):
     """
-    Optimized: Fetches storefronts via a stable point-radius call,
-    then clips them locally to your drive-time polygon boundary.
+    Direct Overpass API stream: Bypasses library parsing loops by 
+    pulling raw JSON data directly from OpenStreetMap servers.
     """
-    tags = {'amenity': ['fast_food', 'restaurant', 'cafe'], 'shop': ['supermarket', 'mall', 'clothes']}
     poi_list = []
     
+    # Create a stable 1.5km bounding search box around your clicked coordinates
+    bbox = f"{lat - 0.015},{lon - 0.015},{lat + 0.015},{lon + 0.015}"
+    
+    # Formulate pure Overpass QL Query
+    overpass_query = f"""
+    [out:json][timeout:30];
+    (
+      node["amenity"~"fast_food|restaurant|cafe"]({bbox});
+      node["shop"~"supermarket|mall|clothes"]({bbox});
+      way["amenity"~"fast_food|restaurant|cafe"]({bbox});
+      way["shop"~"supermarket|mall|clothes"]({bbox});
+    );
+    out center;
+    """
+    
     try:
-        # Step 1: Use an ultra-stable point extraction query over a 1.2km buffer zone
-        gdf = ox.features_from_point((lat, lon), tags=tags, dist=1200)
-        if gdf.empty:
+        headers = {'User-Agent': 'RetailAIPlannerAgent/1.0'}
+        response = requests.get("https://overpass-api.de/api/interpreter", params={'data': overpass_query}, headers=headers, timeout=25)
+        
+        if response.status_code != 200:
             return pd.DataFrame(columns=['Brand/Name', 'Category']), {}, 0, []
+            
+        elements = response.json().get('elements', [])
+        raw_records = []
         
-        # Step 2: Standardize geometries to centroids
-        gdf['geometry'] = gdf.geometry.centroid
-        
-        # Step 3: Run local spatial filtering against the drive-time boundary shape
-        gdf = gdf[gdf.geometry.apply(lambda point: isochrone_polygon.contains(point))]
-        if gdf.empty:
-            return pd.DataFrame(columns=['Brand/Name', 'Category']), {}, 0, []
-        
-        # Step 4: Ensure metadata target columns are present
-        for column_tag in ['brand', 'name', 'amenity', 'shop']:
-            if column_tag not in gdf.columns:
-                gdf[column_tag] = None
-        
-        gdf['category'] = gdf['amenity'].fillna(gdf['shop']).fillna('Retail Store').astype(str).str.replace('_', ' ').str.title()
-        gdf['final_brand'] = gdf['brand'].fillna(gdf['name']).fillna('Independent Retailer').astype(str)
-        
-        # Deduplicate immediate proximity storefront entries
-        gdf = gdf.drop_duplicates(subset=['final_brand', 'category', gdf['geometry'].x.round(5), gdf['geometry'].y.round(5)])
-        
-        for idx, row in gdf.iterrows():
-            poi_list.append({
-                "name": str(row['final_brand']),
-                "lat": float(row['geometry'].y),
-                "lon": float(row['geometry'].x),
-                "category": str(row['category'])
+        for el in elements:
+            # Handle standard nodes and multi-node structural centroids safely
+            p_lat = el['center']['lat'] if 'center' in el else el.get('lat')
+            p_lon = el['center']['lon'] if 'center' in el else el.get('lon')
+            
+            if p_lat is None or p_lon is None:
+                continue
+                
+            # Perform local point-in-polygon verification against your exact driving network boundaries
+            pt = Point(p_lon, p_lat)
+            if not isochrone_polygon.contains(pt):
+                continue
+                
+            tags = el.get('tags', {})
+            amenity = tags.get('amenity')
+            shop = tags.get('shop')
+            
+            # Format clean strings
+            raw_cat = amenity if amenity else (shop if shop else 'Retail Store')
+            category = str(raw_cat).replace('_', ' ').title()
+            brand = tags.get('brand', tags.get('name', 'Independent Retailer'))
+            
+            raw_records.append({
+                'Brand/Name': str(brand),
+                'Category': str(category),
+                'lat': float(p_lat),
+                'lon': float(p_lon)
             })
             
-        brand_counts = gdf['final_brand'].value_counts().to_dict()
-        top_10 = dict(list(brand_counts.items())[:10])
-        total_competition = len(gdf)
+        if not raw_records:
+            return pd.DataFrame(columns=['Brand/Name', 'Category']), {}, 0, []
+            
+        df = pd.DataFrame(raw_records)
+        # Deduplicate overlapping nodes in close proximity
+        df = df.drop_duplicates(subset=['Brand/Name', 'Category', df['lon'].round(4), df['lat'].round(4)])
         
-        df_clean = gdf[['final_brand', 'category']].rename(columns={'final_brand': 'Brand/Name', 'category': 'Category'}).reset_index(drop=True)
+        # Build UI dictionary array with correct lowercase object targets
+        for idx, row in df.iterrows():
+            poi_list.append({
+                "name": row['Brand/Name'],
+                "category": row['Category'],
+                "lat": row['lat'],
+                "lon": row['lon']
+            })
+            
+        brand_counts = df['Brand/Name'].value_counts().to_dict()
+        top_10 = dict(list(brand_counts.items())[:10])
+        total_competition = len(df)
+        df_clean = df[['Brand/Name', 'Category']].reset_index(drop=True)
         
         return df_clean, top_10, total_competition, poi_list
+        
     except Exception:
         return pd.DataFrame(columns=['Brand/Name', 'Category']), {}, 0, []
 
 def calculate_market_scores(total_comp, target_brand, top_10_brands):
-    """
-    Smarter case-insensitive matching logic for tracking existing sister stores.
-    """
     internal_brand_count = 0
     target_clean = str(target_brand).strip().lower()
     
