@@ -12,8 +12,9 @@ st.caption("Live Isochrone Network Mapping & Competitor POI Visualization Engine
 
 col1, col2 = st.columns([1, 1])
 
+# Verify state variables exist
 if "map_center" not in st.session_state:
-    st.session_state.map_center = [12.9716, 77.5946] # Bangalore default
+    st.session_state.map_center = [12.9716, 77.5946] # Bangalore Default
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
 if "spatial_results" not in st.session_state:
@@ -23,19 +24,20 @@ with col1:
     st.header("1. Input Parameters")
     target_brand = st.text_input("Enter Your Expansion Brand Name:", value="KFC")
 
-# Helper function to define dynamic category color hexes
 def get_category_color(category_str):
     cat = category_str.lower()
     if 'fast food' in cat or 'restaurant' in cat:
-        return '#E74C3C' # Red
+        return '#E74C3C'  # Red
     elif 'cafe' in cat:
-        return '#E67E22' # Orange
+        return '#E67E22'  # Orange
     elif 'supermarket' in cat or 'mall' in cat:
-        return '#2ECC71' # Green
-    return '#9B59B6' # Purple for apparel/other retail
+        return '#2ECC71'  # Green
+    return '#9B59B6'      # Purple for general retail
 
+# Phase A: User needs to pick a coordinates spot
 if not st.session_state.analysis_done:
     with col1:
+        st.info("💡 Click anywhere on the map grid below to analyze the true 1 km drive-time network.")
         m = folium.Map(location=st.session_state.map_center, zoom_start=14)
         m.add_child(folium.LatLngPopup())
         map_data = st_folium(m, height=400, width=600, key="initial_market_map")
@@ -45,19 +47,13 @@ if not st.session_state.analysis_done:
         lon = map_data["last_clicked"]["lng"]
         st.session_state.map_center = [lat, lon]
         
-        with st.spinner("Analyzing spatial patterns and transit infrastructure..."):
-            # 1. Compute the drive-time network elements cleanly
-            buffer_data = get_drive_time_buffer(lat, lon)
-            poly = buffer_data[0]             # The Polygon geometry
-            boundary_coords = buffer_data[1]  # The ordered outer outline list
-            
-            # 2. Extract asset features using the distinct polygon
+        with st.spinner("Processing network elements..."):
+            # Compute spatial data step-by-step
+            poly, boundary_coords = get_drive_time_buffer(lat, lon)
             df_clean, top_10, total_comp, poi_list = fetch_competitors(poly)
-            
-            # 3. Calculate metrics based on clean variables
             suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
             
-            # 4. Save everything together to session state
+            # Lock objects to session memory
             st.session_state.spatial_results = {
                 "lat": lat,
                 "lon": lon,
@@ -72,12 +68,15 @@ if not st.session_state.analysis_done:
             st.session_state.analysis_done = True
             st.rerun()
 
+# Phase B: Display results safely
 if st.session_state.analysis_done:
     res = st.session_state.spatial_results
+    
+    # Establish persistent map
     m_fixed = folium.Map(location=[res["lat"], res["lon"]], zoom_start=15)
+    folium.Marker([res["lat"], res["lon"]], tooltip="Target Store Site", icon=folium.Icon(color="black", icon="star")).add_to(m_fixed)
     
-    folium.Marker([res["lat"], res["lon"]], tooltip="Proposed Location", icon=folium.Icon(color="black", icon="star")).add_to(m_fixed)
-    
+    # Trace the network polygon line
     if res["boundary_coords"]:
         folium.Polygon(
             locations=res["boundary_coords"],
@@ -86,36 +85,27 @@ if st.session_state.analysis_done:
             fill=True,
             fill_color="#3498DB",
             fill_opacity=0.15,
-            tooltip="1 km True Drive-Time Catchment Ring"
+            tooltip="1 km Drive Buffer Boundaries"
         ).add_to(m_fixed)
         
-    # Plotting scaling POIs with advanced hover elements
+    # Drop color-coded scaling circular POI elements
     for poi in res["poi_list"]:
         color = get_category_color(poi["category"])
+        tooltip_html = f"<b>Store Name:</b> {poi['name']}<br><b>Category:</b> {poi['category']}"
         
-        # Clean HTML construction for interactive hover tooltips
-        tooltip_html = f"""
-        <div style="font-family: Arial, sans-serif; font-size: 12px; padding: 4px;">
-            <strong>Name:</strong> {poi['name']}<br>
-            <strong>Category:</strong> {poi['category']}<br>
-            <strong>Coordinates:</strong> {round(poi['lat'],4)}, {round(poi['lon'],4)}
-        </div>
-        """
-        
-        # folium.Circle scales naturally in meters as you zoom closer or further away
         folium.Circle(
             location=[poi["lat"], poi["lon"]],
-            radius=15, # Fixed physical radius in meters
-            tooltip=folium.Tooltip(tooltip_html),
+            radius=15, # Physical footprint meters scale
+            tooltip=tooltip_html,
             color=color,
             fill=True,
             fill_color=color,
-            fill_opacity=0.75
+            fill_opacity=0.8
         ).add_to(m_fixed)
         
     with col1:
-        st.success(f"Calculated Trade Area: {round(res['lat'], 4)}, {round(res['lon'], 4)}")
-        st_folium(m_fixed, height=450, width=600, key="static_display_map")
+        st.success(f"Calculated Target Site Location: {round(res['lat'], 4)}, {round(res['lon'], 4)}")
+        st_folium(m_fixed, height=400, width=600, key="static_display_map")
         
         if st.button("🔄 Reset & Choose New Location"):
             st.session_state.analysis_done = False
@@ -127,10 +117,9 @@ if st.session_state.analysis_done:
         kpi2.metric("Suitability Index", f"{res['suitability']}/100")
         kpi3.metric("Cannibalization Risk", f"{res['cannibalization']}/100")
         
-        # Displaying full segmented table metrics 
         if not res["df_clean"].empty:
-            st.subheader("📋 Complete Trade Area Asset List")
-            st.dataframe(res["df_clean"], use_container_width=True, height=250)
+            st.subheader("📋 Complete Asset Location Matrix")
+            st.dataframe(res["df_clean"], use_container_width=True, height=200)
             
     with col2:
         st.header("2. Real-Time Generative Site Report")
@@ -140,4 +129,7 @@ if st.session_state.analysis_done:
             st.markdown("---")
             st.markdown(ai_report)
         except Exception:
-            st.info("📊 Structural visualization layers updated successfully.")
+            st.info("📊 Spatial infrastructure layer compiled successfully.")
+else:
+    with col2:
+        st.info("👈 Click anywhere on the map grid to display the true drive-time network boundary polygon and overlay local commercial storefront nodes.")
