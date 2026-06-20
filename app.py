@@ -5,9 +5,7 @@ import pandas as pd
 from spatial_engine import get_drive_time_buffer, fetch_competitors, calculate_market_scores
 from geocoder_engine import geocode_location
 from report_engine import generate_ai_report_direct
-
-# MODULAR ADDITION: Import our new advanced spatial optimization grid layout matrix
-from grid_engine import generate_hexagonal_grid, rank_hexagonal_grids
+from grid_engine import generate_h3_grid, rank_h3_grids
 
 st.set_page_config(layout="wide", page_title="AI Market Planner Agent")
 
@@ -46,6 +44,18 @@ def get_category_color(category_str):
         return '#2ECC71'  # Green
     return '#9B59B6'      # Purple for general retail
 
+# Dynamic function to compute percentile color ramp symbology
+def get_ramp_color(percentile_val):
+    if percentile_val >= 0.90:
+        return "#1E8449"  # Top 10% - Deep Dark Green (Hotspot)
+    elif percentile_val >= 0.70:
+        return "#2ECC71"  # Top 10% - 30% - Light Vibrant Green
+    elif percentile_val >= 0.50:
+        return "#F4D03F"  # Top 30% - 50% - Warm Yellow
+    elif percentile_val >= 0.25:
+        return "#DC7633"  # Top 50% - 75% - Muted Orange
+    return "#E74C3C"      # Bottom 25% - Red (Saturated / Unfavorable)
+
 if not st.session_state.analysis_done:
     with col1:
         st.info("💡 Click anywhere on the map grid below to analyze the true 1 km drive-time network.")
@@ -66,7 +76,7 @@ if not st.session_state.analysis_done:
             st.session_state.spatial_results = {
                 "lat": lat,
                 "lon": lon,
-                "poly": poly, # Keep raw polygon reference intact for hex generation
+                "poly": poly,
                 "boundary_coords": boundary_coords,
                 "poi_list": poi_list,
                 "total_comp": total_comp,
@@ -116,6 +126,8 @@ if st.session_state.analysis_done:
         if st.button("🔄 Reset & Choose New Location"):
             st.session_state.analysis_done = False
             st.session_state.spatial_results = {}
+            if "ranked_grids" in st.session_state.spatial_results:
+                del st.session_state.spatial_results["ranked_grids"]
             st.rerun()
             
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -131,15 +143,12 @@ if st.session_state.analysis_done:
         st.header("2. Real-Time Generative Site Report")
         try:
             api_key = st.secrets["GROQ_API_KEY"]
-            ai_report = generate_ai_report_direct(res["target_brand"] if "target_brand" in res else target_brand, res["total_comp"], res["top_10"], res["suitability"], res["cannibalization"], api_key)
+            ai_report = generate_ai_report_direct(target_brand, res["total_comp"], res["top_10"], res["suitability"], res["cannibalization"], api_key)
             st.markdown("---")
             st.markdown(ai_report)
         except Exception as e:
-            st.info("📊 Spatial infrastructure landscape captured successfully.")
+            st.info("📊 Spatial infrastructure layer compiled successfully.")
 
-        # -----------------------------------------------------------------------------------------
-        # NEW COMPONENT VIEW: STRATEGIC MICRO-MARKET HEXAGONAL OPTIMIZATION
-        # -----------------------------------------------------------------------------------------
         st.markdown("---")
         st.header("3. Multi-Criteria Hexagonal Optimization")
         
@@ -152,66 +161,97 @@ if st.session_state.analysis_done:
             category_weights = {}
             total_allocated_weight = 0
             
-            # Form clean horizontal user parameter matrix inputs
             for cat in unique_categories:
                 val = st.number_input(f"Weight (%) for {cat}:", min_value=0, max_value=100, value=0, step=5, key=f"weight_{cat}")
                 category_weights[cat] = val
                 total_allocated_weight += val
                 
-            # Running total status tracking bar
             if total_allocated_weight == 100:
                 st.success(f"✅ Total Weight Configuration: {total_allocated_weight}% / 100% (Balanced)")
                 
-                st.subheader("📐 Grid Configuration parameters")
-                grid_resolution_meters = st.slider("Hexagon Cell Resolution Size (Radius in Meters):", min_value=100, max_value=1000, value=250, step=50)
+                st.subheader("📐 Uber H3 Grid Settings")
+                # Dynamic picker mapped directly to standardized Uber H3 granularity scales
+                h3_res_choice = st.select_slider(
+                    "Select Uber H3 Granularity (Resolution Level):", 
+                    options=[8, 9, 10], 
+                    value=9,
+                    format_func=lambda x: f"Res {x} (~170m cells)" if x==9 else (f"Res {x} (~460m cells)" if x==8 else f"Res {x} (~65m cells)")
+                )
                 
                 if st.button("🚀 Calculate Hexagonal Grid Rankings"):
-                    with st.spinner("Computing overlapping cell geometries and ranks..."):
-                        # Generate hexes matching exact bounds
-                        hex_cells = generate_hexagonal_grid(res["poly"], res["lat"], grid_resolution_meters)
-                        ranked_grids = rank_hexagonal_grids(hex_cells, res["poi_list"], category_weights)
+                    with st.spinner("Computing H3 spatial tiles and mapping score ranks..."):
+                        h3_cells = generate_h3_grid(res["poly"], h3_res_choice)
+                        ranked_grids = rank_h3_grids(h3_cells, res["poi_list"], category_weights)
                         
                         if ranked_grids:
                             st.session_state.spatial_results["ranked_grids"] = ranked_grids
-                            st.success("Matrix calculated completely! Check results map below.")
+                            st.success("H3 Multi-Criteria Matrix calculated completely!")
             else:
                 st.warning(f"⚠️ Current Weight Allocation: **{total_allocated_weight}%**. Please adjust category inputs to total exactly 100% to unlock optimization.")
                 
-            # Render the secondary submarket ranked map cleanly below the inputs
             if "ranked_grids" in res:
                 st.subheader("🗺️ Micro-Market Optimization Heatmap")
-                st.caption("Hover over cells to see local ranks. Rank 1 indicates top core density asset spot.")
+                st.caption("Color Ramp Symbology: Green = Top Hotspots, Red = Saturated Tiers.")
                 
                 m_hex = folium.Map(location=[res["lat"], res["lon"]], zoom_start=15)
+                
+                # DRAW TRADE AREA OVERLAY BOUNDARY AGAIN ON TOP OF THE HEX MAP
+                if res["boundary_coords"]:
+                    folium.Polygon(
+                        locations=res["boundary_coords"],
+                        color="#2E4053",
+                        weight=4,
+                        fill=False,
+                        tooltip="1 km Core Isochrone Boundary Reference"
+                    ).add_to(m_hex)
+                
                 folium.Marker([res["lat"], res["lon"]], tooltip="Proposed Location Site", icon=folium.Icon(color="black", icon="star")).add_to(m_hex)
                 
                 max_rank = len(res["ranked_grids"])
                 
                 for g in res["ranked_grids"]:
-                    # Color gradient calculation based on proximity to Rank 1
-                    # Rank 1 gets a dark vibrant purple, lower ranks fade away cleanly
-                    rank_ratio = (max_rank - g["rank"] + 1) / (max_rank if max_rank > 0 else 1)
-                    fill_opacity = 0.1 + (rank_ratio * 0.5)
+                    # Fetch color dynamic ramp based on performance percentile distributions
+                    fill_color = get_ramp_color(g["percentile"])
                     
                     popup_hover_text = f"""
                     <div style='font-family:Arial, sans-serif; font-size:12px; line-height:1.4; padding:5px;'>
-                        <b>Micro-Market Rank:</b> #{g['rank']} of {max_rank}<br>
+                        <b>H3 Cell Rank:</b> #{g['rank']} of {max_rank}<br>
                         <b>Suitability Score:</b> {round(g['score']*100, 1)} pts<br>
-                        <b>Total Inside Density:</b> {g['total_density']} stores
+                        <b>Total Retail Nodes Inside:</b> {g['total_density']} stores
                     </div>
                     """
                     
+                    # Render H3 cells using the dynamic color ramp symbology
                     folium.Polygon(
                         locations=g["boundary_locations"],
-                        color="#8E44AD",
-                        weight=2,
+                        color="#7F8C8D",
+                        weight=1.5,
                         fill=True,
-                        fill_color="#9B59B6",
-                        fill_opacity=fill_opacity,
+                        fill_color=fill_color,
+                        fill_opacity=0.45,
                         tooltip=folium.Tooltip(popup_hover_text)
                     ).add_to(m_hex)
                     
-                st_folium(m_hex, height=400, width=600, key="hexagonal_grid_optimizer_map")
+                    # ADD TEXT LABELS DIRECTLY ON TOP OF EACH HEXAGON CELL DISPLAYING THE EXPLICIT RANK
+                    label_html = f"""
+                    <div style="font-family: 'Arial Black', sans-serif; font-size: 11px; 
+                                color: #2C3E50; font-weight: bold; width: 24px; height: 24px; 
+                                text-align: center; line-height: 24px; 
+                                background-color: rgba(255,255,255,0.75); 
+                                border: 1px solid #BDC3C7; border-radius: 50%;">
+                        {g['rank']}
+                    </div>
+                    """
+                    folium.Marker(
+                        location=[g["centroid_lat"], g["centroid_lon"]],
+                        icon=folium.features.DivIcon(
+                            html=label_html,
+                            icon_size=(24, 24),
+                            icon_anchor=(12, 12)
+                        )
+                    ).add_to(m_hex)
+                    
+                st_folium(m_hex, height=450, width=600, key="hexagonal_grid_optimizer_map")
 else:
     with col2:
         st.info("👈 Click anywhere on the map grid to display the true drive-time network boundary polygon and overlay local commercial storefront nodes.")
