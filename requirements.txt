@@ -12,3 +12,4 @@ networkx
 pandas
 scikit-learn
 requests
+h3
