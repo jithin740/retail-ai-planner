@@ -36,7 +36,7 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
 def fetch_competitors(isochrone_polygon):
     """
     Finds all retail/food brands inside the boundary, groups them cleanly by category,
-    and drops geometry duplicates to ensure crisp numbers.
+    and defends against missing OpenStreetMap attribute columns.
     """
     tags = {'amenity': ['fast_food', 'restaurant', 'cafe'], 'shop': ['supermarket', 'mall', 'clothes']}
     poi_list = []
@@ -46,17 +46,22 @@ def fetch_competitors(isochrone_polygon):
         if gdf.empty:
             return pd.DataFrame(), {}, 0, []
         
-        # Convert all polygons/lines into clean point centroids
+        # Convert geometries safely to point centroids
         gdf['geometry'] = gdf.geometry.centroid
         
-        # Parse crisp classification types
-        gdf['category'] = gdf['amenity'].fillna(gdf['shop']).fillna('retail').str.replace('_', ' ').str.title()
-        gdf['final_brand'] = gdf['brand'].fillna(gdf['name']).fillna('Independent Retailer')
+        # DEFENSIVE CHECK: Ensure standard metadata columns exist to prevent KeyErrors
+        for col in ['brand', 'name', 'amenity', 'shop']:
+            if col not in gdf.columns:
+                gdf[col] = None
         
-        # Drop duplicates where identical store brands share overlapping location nodes
+        # Parse clean categories and brand labels safely
+        gdf['category'] = gdf['amenity'].fillna(gdf['shop']).fillna('Retail Store').astype(str).str.replace('_', ' ').str.title()
+        gdf['final_brand'] = gdf['brand'].fillna(gdf['name']).fillna('Independent Retailer').astype(str)
+        
+        # Drop spatial duplicates where identical storefronts share node clusters
         gdf = gdf.drop_duplicates(subset=['final_brand', 'category', gdf['geometry'].x.round(5), gdf['geometry'].y.round(5)])
         
-        # Extract metadata attributes for advanced hover tooltips
+        # Pack records for map marker rendering
         for idx, row in gdf.iterrows():
             poi_list.append({
                 "name": str(row['final_brand']),
@@ -65,21 +70,20 @@ def fetch_competitors(isochrone_polygon):
                 "category": str(row['category'])
             })
             
-        # Create structural counts
         brand_counts = gdf['final_brand'].value_counts().to_dict()
         top_10 = dict(list(brand_counts.items())[:10])
         total_competition = len(gdf)
         
-        # Keep clean columns for the dataframe table render
         df_clean = gdf[['final_brand', 'category']].rename(columns={'final_brand': 'Brand/Name', 'category': 'Category'}).reset_index(drop=True)
         
         return df_clean, top_10, total_competition, poi_list
-    except Exception:
-        return pd.DataFrame(), {}, 0, []
+    except Exception as e:
+        # If an entirely different system failure happens, expose it slightly via empty indicators
+        return pd.DataFrame(columns=['Brand/Name', 'Category']), {}, 0, []
 
 def calculate_market_scores(total_comp, target_brand, top_10_brands):
     """
-    Looks for partial, case-insensitive string matches to track cannibalization.
+    Looks for partial, case-insensitive string matches to calculate cannibalization.
     """
     internal_brand_count = 0
     target_clean = str(target_brand).strip().lower()
@@ -89,6 +93,6 @@ def calculate_market_scores(total_comp, target_brand, top_10_brands):
             internal_brand_count += count
             
     cannibalisation_score = min(100, internal_brand_count * 35) 
-    suitability_score = max(10, 90 - (total_comp * 2) - cannibalisation_score) # Dampened slightly due to deduplicated counts
+    suitability_score = max(10, 90 - (total_comp * 2) - cannibalisation_score)
     
     return suitability_score, cannibalisation_score
