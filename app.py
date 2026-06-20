@@ -12,55 +12,74 @@ st.caption("Live Isochrone Network Mapping & Competitor POI Visualization Engine
 
 col1, col2 = st.columns([1, 1])
 
+# Initialize session state variables so data doesn't vanish on rerun
+if "map_center" not in st.session_state:
+    st.session_state.map_center = [12.9716, 77.5946] # Bangalore default
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
+if "spatial_results" not in st.session_state:
+    st.session_state.spatial_results = {}
+
 with col1:
     st.header("1. Input Parameters")
     target_brand = st.text_input("Enter Your Expansion Brand Name:", value="KFC")
-    
-    # Track coordinates in session state so the map keeps them across updates
-    if "map_center" not in st.session_state:
-        st.session_state.map_center = [12.9716, 77.5946] # Bangalore default
-        
-    m = folium.Map(location=st.session_state.map_center, zoom_start=14)
-    m.add_child(folium.LatLngPopup())
 
-# Listen for map click inputs
-map_data = st_folium(m, height=400, width=600, key="market_map")
+# Listen for map click inputs on the base map only if we aren't displaying results yet
+if not st.session_state.analysis_done:
+    with col1:
+        m = folium.Map(location=st.session_state.map_center, zoom_start=14)
+        m.add_child(folium.LatLngPopup())
+        map_data = st_folium(m, height=400, width=600, key="initial_market_map")
 
-if map_data and map_data.get("last_clicked"):
-    lat = map_data["last_clicked"]["lat"]
-    lon = map_data["last_clicked"]["lng"]
-    st.session_state.map_center = [lat, lon]
-    
-    with st.spinner("Analyzing spatial patterns and transit infrastructure..."):
-        # 1. Fetch the network polygon geometry boundary
-        poly, boundary_coords = get_drive_time_buffer(lat, lon)
+    if map_data and map_data.get("last_clicked"):
+        lat = map_data["last_clicked"]["lat"]
+        lon = map_data["last_clicked"]["lng"]
+        st.session_state.map_center = [lat, lon]
         
-        # 2. Extract specific POIs
-        gdf, top_10, total_comp, poi_list = fetch_competitors(poly)
-        
-        # 3. Compute structural analytics
-        suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
-        
-    # Re-build map to draw the custom visual layers
-    m_updated = folium.Map(location=[lat, lon], zoom_start=14)
+        with st.spinner("Analyzing spatial patterns and transit infrastructure..."):
+            # Fetch calculations
+            poly, boundary_coords = get_drive_time_buffer(lat, lon)
+            gdf, top_10, total_comp, poi_list = fetch_competitors(poly)
+            suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
+            
+            # Save EVERYTHING to session state so it survives the rerun
+            st.session_state.spatial_results = {
+                "lat": lat,
+                "lon": lon,
+                "boundary_coords": boundary_coords,
+                "poi_list": poi_list,
+                "total_comp": total_comp,
+                "suitability": suitability,
+                "cannibalization": cannibalization,
+                "top_10": top_10
+            }
+            st.session_state.analysis_done = True
+            st.rerun()
+
+# If analysis is done, lock the computed layers onto the screen
+if st.session_state.analysis_done:
+    res = st.session_state.spatial_results
     
-    # Mark proposed storefront location
-    folium.Marker([lat, lon], tooltip="Proposed Location", icon=folium.Icon(color="red", icon="star")).add_to(m_updated)
+    # Re-build final map with the persistent visual layers
+    m_fixed = folium.Map(location=[res["lat"], res["lon"]], zoom_start=14)
     
-    # DRAW THE TRUE 1KM DRIVE ISOCHRONE BOUNDARY LAYER
-    if boundary_coords:
+    # Mark proposed location
+    folium.Marker([res["lat"], res["lon"]], tooltip="Proposed Location", icon=folium.Icon(color="red", icon="star")).add_to(m_fixed)
+    
+    # Draw drive-time polygon boundary
+    if res["boundary_coords"]:
         folium.Polygon(
-            locations=boundary_coords,
+            locations=res["boundary_coords"],
             color="#3186cc",
             weight=3,
             fill=True,
             fill_color="#3186cc",
             fill_opacity=0.2,
             tooltip="1 km True Drive-Time Isochrone"
-        ).add_to(m_updated)
+        ).add_to(m_fixed)
         
-    # PLOT EVERY SINGLE COMPETITOR WITHIN THE DRIVE NETWORK BOUNDARY
-    for poi in poi_list:
+    # Plot competitor POI markers
+    for poi in res["poi_list"]:
         folium.CircleMarker(
             location=[poi["lat"], poi["lon"]],
             radius=6,
@@ -69,28 +88,34 @@ if map_data and map_data.get("last_clicked"):
             fill=True,
             fill_color="orange",
             fill_opacity=0.7
-        ).add_to(m_updated)
+        ).add_to(m_fixed)
         
     with col1:
-        st.success(f"Calculated Trade Area: {round(lat, 4)}, {round(lon, 4)}")
+        st.success(f"Calculated Trade Area: {round(res['lat'], 4)}, {round(res['lon'], 4)}")
         
-        # Render the enhanced visual map interface over the old layout
-        st_folium(m_updated, height=400, width=600, key="updated_render_map")
+        # Display the static map wrapper that won't flash or clear out
+        st_folium(m_fixed, height=400, width=600, key="static_display_map")
         
+        # Reset button to clear state and look at another market site selection
+        if st.button("Reset & Choose New Location"):
+            st.session_state.analysis_done = False
+            st.session_state.spatial_results = {}
+            st.rerun()
+            
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("Nearby POIs", total_comp)
-        kpi2.metric("Suitability Index", f"{suitability}/100")
-        kpi3.metric("Cannibalization Risk", f"{cannibalization}/100")
+        kpi1.metric("Nearby POIs", res["total_comp"])
+        kpi2.metric("Suitability Index", f"{res['suitability']}/100")
+        kpi3.metric("Cannibalization Risk", f"{res['cannibalization']}/100")
         
-        if top_10:
+        if res["top_10"]:
             st.subheader("Top 10 Nearby Brands")
-            st.dataframe(pd.DataFrame(top_10.items(), columns=["Brand", "Count"]))
+            st.dataframe(pd.DataFrame(res["top_10"].items(), columns=["Brand", "Count"]))
             
     with col2:
         st.header("2. Real-Time Generative Site Report")
         try:
             api_key = st.secrets["GROQ_API_KEY"]
-            ai_report = generate_spatial_report(target_brand, total_comp, top_10, suitability, cannibalization, api_key)
+            ai_report = generate_spatial_report(target_brand, res["total_comp"], res["top_10"], res["suitability"], res["cannibalization"], api_key)
             st.markdown("---")
             st.markdown(ai_report)
         except Exception:
