@@ -5,7 +5,9 @@ def generate_spatial_report(target_brand, total_comp, top_10_brands, suitability
     """
     Passes our spatial calculations along with the API key to generate a professional C-suite report.
     """
-    # Pass the key explicitly into the model initialization
+    if not api_key:
+        return "API key missing or configuration error."
+        
     llm = ChatGroq(model="llama3-8b-8b", temperature=0.2, groq_api_key=api_key)
     
     template = """
