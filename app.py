@@ -46,12 +46,8 @@ if not st.session_state.analysis_done:
         st.session_state.map_center = [lat, lon]
         
         with st.spinner("Processing network elements..."):
-            # Compute spatial data components sequentially
             poly, boundary_coords = get_drive_time_buffer(lat, lon)
-            
-            # Pass point parameters along with geometry to bypass Overpass polygon timeouts
             df_clean, top_10, total_comp, poi_list = fetch_competitors(lat, lon, poly)
-            
             suitability, cannibalization = calculate_market_scores(total_comp, target_brand, top_10)
             
             st.session_state.spatial_results = {
@@ -88,7 +84,6 @@ if st.session_state.analysis_done:
     for poi in res["poi_list"]:
         color = get_category_color(poi["category"])
         
-        # Enhanced interactive HTML hover data tooltip
         tooltip_html = f"""
         <div style="font-family: Arial, sans-serif; font-size: 12px; padding: 4px; line-height:1.4;">
             <strong>Asset:</strong> {poi['name']}<br>
@@ -99,7 +94,7 @@ if st.session_state.analysis_done:
         
         folium.Circle(
             location=[poi["lat"], poi["lon"]],
-            radius=16, # Physical footprint meters zoom-responsive scale
+            radius=16,
             tooltip=folium.Tooltip(tooltip_html),
             color=color,
             fill=True,
