@@ -10,7 +10,7 @@ ox.settings.log_console = False
 def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     """
     Calculates a real 1 km drive-time zone and returns both the Polygon 
-    and the coordinates needed to plot its boundary line on the map.
+    and a perfectly ordered exterior ring for a clean map outline.
     """
     time_limit_seconds = (distance_km / speed_kmh) * 3600
     
@@ -25,8 +25,12 @@ def get_drive_time_buffer(lat, lon, distance_km=1.0, speed_kmh=30.0):
     node_points = [Point(data['x'], data['y']) for node, data in subgraph.nodes(data=True)]
     isochrone_poly = Polygon([[p.x, p.y] for p in node_points]).convex_hull
     
-    # Format the boundary coordinates explicitly for Folium maps [[lat, lon], [lat, lon]]
-    boundary_coords = [[p.y, p.x] for p in node_points]
+    # FIX: Get the perfectly ordered outer shell coordinates from the convex hull polygon
+    if isinstance(isochrone_poly, Polygon):
+        x, y = isochrone_poly.exterior.coords.xy
+        boundary_coords = [[lat_val, lon_val] for lon_val, lat_val in zip(x, y)]
+    else:
+        boundary_coords = [[p.y, p.x] for p in node_points]
     
     return isochrone_poly, boundary_coords
 
