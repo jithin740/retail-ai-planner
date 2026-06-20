@@ -128,7 +128,7 @@ if st.session_state.analysis_done:
             st.markdown("---")
             st.markdown(ai_report)
         except Exception:
-            st.info("📊 Spatial infrastructure layer compiled successfully.")
+            st.info("📊 Spatial infrastructure layer compiled successfully. Insert an active API key to unlock the text report summarizer module.")
 else:
     with col2:
         st.info("👈 Click anywhere on the map grid to display the true drive-time network boundary polygon and overlay local commercial storefront nodes.")
